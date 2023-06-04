@@ -398,10 +398,16 @@ static int alien_load(lua_State *L) {
     return luaL_error(L, "alien: out of memory");
   strcpy(name, libname);
   al = (alien_Library *)lua_newuserdata(L, sizeof(alien_Library));
-  if(!al) return luaL_error(L, "alien: out of memory");
+  if(!al) {
+    LALLOC_FREE_STRING(lalloc, aud, name);
+    return luaL_error(L, "alien: out of memory");
+  }
   lib = alien_openlib(L, libname);
-  if(!lib)
+  if(!lib) {
+    lua_remove(L, -2); // userdata
+    LALLOC_FREE_STRING(lalloc, aud, name);
     return lua_error(L);
+  }
   lua_newtable(L);
   lua_setuservalue(L, -2);
   luaL_getmetatable(L, ALIEN_LIBRARY_META);
@@ -679,6 +685,7 @@ static int alien_function_call(lua_State *L) {
   if(nargs > 0) args = alloca(sizeof(void*) * nargs);
   for(i = 0; i < nargs; i++) {
     void *arg;
+    alien_Function *afc;
     int j = i + 2;
     switch(af->params[i]) {
     case AT_byte:
@@ -726,7 +733,12 @@ static int alien_function_call(lua_State *L) {
       break;
     case AT_pointer:
       arg = alloca(sizeof(char*));
-      *((void**)arg) = lua_isstring(L, j) ? (void*)lua_tostring(L, j) : alien_touserdata(L, j);
+      afc = luaL_testudata(L, j, ALIEN_FUNCTION_META);
+      if (afc) {
+        *((void**)arg) = afc->ffi_codeloc;
+      } else {
+        *((void**)arg) = lua_isstring(L, j) ? (void*)lua_tostring(L, j) : alien_touserdata(L, j);
+      }
       break;
     case AT_refchar:
       arg = alloca(sizeof(char *));
@@ -759,7 +771,7 @@ static int alien_function_call(lua_State *L) {
       arg = alloca(sizeof(unsigned long long)); *((unsigned long long*)arg) = (unsigned long long)lua_tonumber(L, j);
       break;
     case AT_callback:
-      arg = alloca(sizeof(void*)); *((void**)arg) = (alien_Function *)alien_checkfunction(L, j)->fn;
+      arg = alloca(sizeof(void*)); *((void**)arg) = alien_checkfunction(L, j)->ffi_codeloc;
       break;
     default:
       return luaL_error(L, "alien: parameter %d is of unknown type (function %s)", j,
